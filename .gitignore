@@ -5,3 +5,5 @@ data
 *.swp
 *.p
 .DS_Store
+*.pyc
+__pycache__
