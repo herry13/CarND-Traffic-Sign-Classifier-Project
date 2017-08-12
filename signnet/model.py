@@ -180,16 +180,10 @@ class SignNet:
         meta_file = None
         if not state_only:
             meta_file = self.saver.save(session, file_path, write_state=False)
-        if steps is None:
-            steps = self.steps
-        state_file = self.saver.save(session, file_path, global_step=steps,
-                                     write_meta_graph=False)
-        if meta_file is None:
-            tf.logging.info('Saved meta and state model into {} and {}.'.format(
-                    meta_file, state_file))
-        else:
-            tf.logging.info('Saved state model into {}.'.format(state_file))
-            
+            tf.logging.info('Saved meta model into {}.'.format(meta_file))
+        state_file = self.saver.save(session, file_path,
+                global_step=self.steps, write_meta_graph=False)
+        tf.logging.info('Saved state model into {}.'.format(state_file))
         return meta_file, state_file
 
 
@@ -216,6 +210,8 @@ def _parse_arguments():
     parser.add_argument('--predict', default=None, type=str)
     parser.add_argument('--log-file', default=None, type=str,
                         help='Path of log file.')
+    parser.add_argument('--save-epochs', default=5, type=int,
+                        help='Save the model every N epochs.')
 
     args, unknown = parser.parse_known_args()
     args.shape = tuple(map(lambda x: int(x), args.shape.split('x')))
@@ -242,13 +238,13 @@ def train(args, retrain=False):
             valid_accuracy = net.evaluate(x_valid, y_valid, sess)
             tf.logging.info('Epoch {} -- Accuracy training={:.5f} validation={:.5f}'.format( \
                     i + 1, train_accuracy, valid_accuracy))
-            if (i+1) % 10 == 0:
+            if (i+1) % args.save_epochs == 0:
                 net.save(sess, directory=args.model_dir, state_only=True)
 
         test_accuracy = net.evaluate(x_test, y_test, sess)
         tf.logging.info('Test accuracy={:.5f}'.format(test_accuracy))
 
-        if args.epochs % 10 != 0:
+        if args.epochs % args.save_epochs != 0:
             net.save(sess, directory=args.model_dir, state_only=True)
 
 
