@@ -22,19 +22,20 @@ class SignNet:
     def __init__(self, args, session=None, load=False):
         if session is None:
             raise RuntimeError("Parameter 'session' is None!")
+
         if load:
-            self._load_model(args, session)
+            self._load_model(session, args.name, args.model_dir)
         else:
             self._new_model(args, session)
+            
 
-    def _load_model(self, args, session):
-        meta_file = '{}.meta'.format(args.model_file)
-        if not os.path.exists(meta_file):
-            raise RuntimeError('Meta file {} does not exist!'.format(meta_file))
-        saver = tf.train.import_meta_graph(meta_file)
-        saver.restore(session, tf.train.latest_checkpoint(os.path.dirname(meta_file)))
+    def _load_model(self, session, name, model_dir):
+        self.name = name
+        meta_file = os.path.join(model_dir, self.name + '.meta')
+        
+        self.saver = tf.train.import_meta_graph(meta_file)
+        self.saver.restore(session, tf.train.latest_checkpoint(os.path.dirname(meta_file)))
         graph = tf.get_default_graph()
-        self.name = args.name
         self.scope = tf.variable_scope(self.name)
         tensors = ['x', 'y', 'keep_prob', 'conv1', 'conv2', 'logits', 'steps',
                 'cross_entropy', 'loss', 'accuracy']
@@ -94,8 +95,9 @@ class SignNet:
 
             # Initialize variables
             session.run(tf.global_variables_initializer())
+            self.saver = tf.train.Saver()
 
-    
+            
     def _logits(self, x, size):
         shape = (int(x.shape[1]), size)
         weights = tf.Variable(self._tf_var(shape), name='logits_W')
@@ -173,6 +175,24 @@ class SignNet:
         return float(total / num)
 
 
+    def save(self, session, directory='', state_only=False, steps=None):
+        file_path = os.path.join(directory, self.name)
+        meta_file = None
+        if not state_only:
+            meta_file = self.saver.save(session, file_path, write_state=False)
+        if steps is None:
+            steps = self.steps
+        state_file = self.saver.save(session, file_path, global_step=steps,
+                                     write_meta_graph=False)
+        if meta_file is None:
+            tf.logging.info('Saved meta and state model into {} and {}.'.format(
+                    meta_file, state_file))
+        else:
+            tf.logging.info('Saved state model into {}.'.format(state_file))
+            
+        return meta_file, state_file
+
+
 def _parse_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument('--train', default='train.p', type=str,
@@ -191,10 +211,9 @@ def _parse_arguments():
     parser.add_argument('--keep-prob', default=1.0, type=float)
     parser.add_argument('--shape', default='32x32x3', type=str)
     parser.add_argument('--name', default='signnet', type=str)
-    parser.add_argument('--model-file', default='signnet', type=str,
+    parser.add_argument('--model-dir', default='', type=str,
                         help='Model file (default: signnet)')
     parser.add_argument('--predict', default=None, type=str)
-    parser.add_argument('--retrain', action='store_const', const=True, default=False)
     parser.add_argument('--log-file', default=None, type=str,
                         help='Path of log file.')
 
@@ -203,7 +222,7 @@ def _parse_arguments():
     return args
 
 
-def train(args):
+def train(args, retrain=False):
     def load_data(filepath):
         with file_io.FileIO(filepath, 'rb') as f:
             data = pickle.load(f)
@@ -214,25 +233,23 @@ def train(args):
     x_test, y_test = load_data(args.test)
     args.num_classes = len(np.unique(y_train))
     with tf.Session() as sess:
-        net = SignNet(args, session=sess, load=args.retrain)
-        saver = tf.train.Saver()
+        net = SignNet(args, session=sess, load=retrain)
+        if not retrain:
+            net.save(sess, directory=args.model_dir)
         for i in range(args.epochs):
             train_accuracy = net.batch_train(x_train, y_train, sess,
                     batch_size=args.batch_size, keep_prob=args.keep_prob)
             valid_accuracy = net.evaluate(x_valid, y_valid, sess)
             tf.logging.info('Epoch {} -- Accuracy training={:.5f} validation={:.5f}'.format( \
                     i + 1, train_accuracy, valid_accuracy))
+            if (i+1) % 10 == 0:
+                net.save(sess, directory=args.model_dir, state_only=True)
 
         test_accuracy = net.evaluate(x_test, y_test, sess)
         tf.logging.info('Test accuracy={:.5f}'.format(test_accuracy))
-       
-        dirname = os.path.dirname(args.model_file)
-        basename = os.path.basename(args.model_file)
-        if '-' in basename:
-            basename = basename.rsplit('-', 1)[0]
-        filepath = os.path.join(dirname, basename)
-        filepath = saver.save(sess, filepath, global_step=net.steps)
-        tf.logging.info('The model was saved into file: {}'.format(filepath))
+
+        if args.epochs % 10 != 0:
+            net.save(sess, directory=args.model_dir, state_only=True)
 
 
 def predict(args):
@@ -258,7 +275,13 @@ def main():
     if args.predict is not None:
         predict(args)
     else:
-        train(args)
+        try:
+            meta_file = os.path.join(args.model_dir, args.name + '.meta')
+            with file_io.FileIO(meta_file, 'r'):
+                pass
+            train(args, retrain=True)
+        except:
+            train(args)
 
 
 if __name__ == '__main__':
