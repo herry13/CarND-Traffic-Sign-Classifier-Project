@@ -9,7 +9,6 @@ import argparse
 from collections import namedtuple
 import numpy as np
 from sklearn.utils import shuffle
-#import matplotlib.image as mpimg
 import tensorflow as tf
 from tensorflow.contrib.layers import flatten
 from tensorflow.python.lib.io import file_io
@@ -19,14 +18,19 @@ class SignNet:
     """
     SignNet: a CNN model for Traffic Sign recognition.
     """
-    def __init__(self, args, session=None, load=False):
+    def __init__(self, args=None, session=None, load=False):
         if session is None:
             raise RuntimeError("Parameter 'session' is None!")
 
         if load:
             self._load_model(session, args.name, args.model_dir)
+        elif args is not None:
+            self._new_model(session, name=args.name, shape=args.shape,
+                    num_classes=args.num_classes, conv1=args.conv1,
+                    conv2=args.conv2, fc1=args.fc1, fc2=args.fc2,
+                    learning_rate=args.learning_rate)
         else:
-            self._new_model(args, session)
+            self._new_model(session)
             
 
     def _load_model(self, session, name, model_dir):
@@ -49,16 +53,18 @@ class SignNet:
             self.__dict__[op] = graph.get_operation_by_name(name)
 
 
-    def _new_model(self, args, session):
-        self.name = args.name
+    def _new_model(self, session, name='signnet', shape=(32, 32, 3),
+                   num_classes=1, conv1=2, conv2=4, fc1=4, fc2=2,
+                   learning_rate=0.001):
+        self.name = name
         with tf.variable_scope(self.name) as scope:
             self.scope = scope
             
             # Variables
-            x_shape = (None, args.shape[0], args.shape[1], args.shape[2])
+            x_shape = (None, shape[0], shape[1], shape[2])
             self.x = tf.placeholder(tf.float32, x_shape, name='x')
             self.y = tf.placeholder(tf.int32, (None), name='y')
-            one_hot_y = tf.one_hot(self.y, args.num_classes)
+            one_hot_y = tf.one_hot(self.y, num_classes)
             self.keep_prob = tf.placeholder(tf.float32, name='keep_prob')
 
             # Preprocess
@@ -66,8 +72,8 @@ class SignNet:
             norm_x = (tf.cast(gray_x, tf.float32) - 128.) / 128.
             
             # Convolution layers
-            self.conv1 = self._convolution(1, norm_x, args.conv1, 2, 2)
-            self.conv2 = self._convolution(2, self.conv1, args.conv2, 4, 4)
+            self.conv1 = self._convolution(1, norm_x, conv1, 2, 2)
+            self.conv2 = self._convolution(2, self.conv1, conv2, 4, 4)
 
             # Combine conv1 and conv2
             fc0_1 = flatten(self.conv1)
@@ -75,16 +81,16 @@ class SignNet:
             fc0 = tf.concat([fc0_1, fc0_2], 1)
 
             # Fully-connected layers
-            fc1 = self._fully_connected(1, fc0, args.fc1)
-            fc2 = self._fully_connected(2, fc1, args.fc2)
-            self.logits = self._logits(fc2, args.num_classes)
+            fc1 = self._fully_connected(1, fc0, fc1)
+            fc2 = self._fully_connected(2, fc1, fc2)
+            self.logits = self._logits(fc2, num_classes)
 
             # Operations
             self.cross_entropy = tf.nn.softmax_cross_entropy_with_logits(
                     labels=one_hot_y, logits=self.logits,
                     name='cross_entropy')
             self.loss = tf.reduce_mean(self.cross_entropy, name='loss')
-            optimizer = tf.train.AdamOptimizer(learning_rate=args.learning_rate)
+            optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate)
             self.steps = tf.Variable(0, name='steps', trainable=False)
             self.train_op = optimizer.minimize(self.loss, name='train_op',
                     global_step=self.steps)
@@ -229,7 +235,7 @@ def train(args, retrain=False):
     x_test, y_test = load_data(args.test)
     args.num_classes = len(np.unique(y_train))
     with tf.Session() as sess:
-        net = SignNet(args, session=sess, load=retrain)
+        net = SignNet(args=args, session=sess, load=retrain)
         if not retrain:
             net.save(sess, directory=args.model_dir)
         for i in range(args.epochs):
@@ -249,11 +255,12 @@ def train(args, retrain=False):
 
 
 def predict(args):
-    pass
-    '''img = mpimg.imread(args.predict)
     with tf.Session() as sess:
-        net = SignNet(args, session=sess, load=True)
-        tf.logging.info(net.predict(img, sess)[0])'''
+        image_file = tf.read_file(args.predict)
+        image = sess.run(tf.image.decode_jpeg(image_file))
+        net = SignNet(args=args, session=sess, load=True)
+        label = net.predict(image, sess)[0]
+        tf.logging.info('Label of {} is {}'.format(args.predict, label))
 
 
 def main():
