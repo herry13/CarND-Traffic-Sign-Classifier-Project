@@ -68,12 +68,12 @@ class SignNet:
             self.keep_prob = tf.placeholder(tf.float32, name='keep_prob')
 
             # Preprocess
-            gray_x = tf.image.rgb_to_grayscale(self.x)
-            norm_x = (tf.cast(gray_x, tf.float32) - 128.) / 128.
+            preprocess = tf.image.rgb_to_grayscale(self.x)
+            #preprocess = (tf.cast(preprocess, tf.float32) - 128.) / 128.
             
             # Convolution layers
-            self.conv1 = self._convolution(1, norm_x, conv1, 2, 2)
-            self.conv2 = self._convolution(2, self.conv1, conv2, 4, 4)
+            self.conv1 = self._convolution(1, preprocess, conv1, 4, 4, 4)
+            self.conv2 = self._convolution(2, self.conv1, conv2, 4, 4, 4)
 
             # Combine conv1 and conv2
             fc0_1 = flatten(self.conv1)
@@ -122,13 +122,13 @@ class SignNet:
         name = 'fc{}_b'.format(idx)
         biases = tf.Variable(tf.zeros(size), name=name)
         fc = tf.matmul(x, weights) + biases
-        fc = tf.nn.relu(fc)
+        fc = tf.nn.relu6(fc)
         name = 'fc{}'.format(idx)
         fc = tf.nn.dropout(fc, keep_prob=self.keep_prob, name=name)
         return fc
         
 
-    def _convolution(self, idx, x, features, kernelsize, poolsize):
+    def _convolution(self, idx, x, features, kernelsize, poolsize, poolstridesize):
         # Convolution
         name = 'conv{}_W'.format(idx)
         shape = (kernelsize, kernelsize, int(x.shape[3]), features)
@@ -138,13 +138,12 @@ class SignNet:
         conv = tf.nn.conv2d(x, weights, strides=[1, 1, 1, 1], padding='SAME') \
                     + biases
         # Activation
-        conv = tf.nn.relu(conv)
+        conv = tf.nn.relu6(conv)
         # Dropout
-        conv = tf.nn.dropout(conv, keep_prob=self.keep_prob)
         # Max Pooling
         name = 'conv{}'.format(idx)
-        conv = tf.nn.max_pool(conv, ksize=[1, poolsize, poolsize, 1], \
-                              strides=[1, poolsize, poolsize, 1], \
+        conv = tf.nn.avg_pool(conv, ksize=[1, poolsize, poolsize, 1], \
+                              strides=[1, poolstridesize, poolstridesize, 1], \
                               padding='VALID', name=name)
         return conv
 
